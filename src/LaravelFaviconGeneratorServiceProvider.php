@@ -28,11 +28,6 @@ class LaravelFaviconGeneratorServiceProvider extends PackageServiceProvider
     {
         // Register the favicon-meta component
         Blade::component('favicon-meta', FaviconMeta::class);
-
-        // Register the LaravelFaviconGenerator singleton
-        $this->app->singleton(LaravelFaviconGenerator::class, function () {
-            return new LaravelFaviconGenerator;
-        });
     }
 
     public function packageRegistered(): void
@@ -44,5 +39,15 @@ class LaravelFaviconGeneratorServiceProvider extends PackageServiceProvider
         $this->publishes([
             __DIR__.'/../resources/views' => resource_path('views/vendor/favicon-generator'),
         ], 'favicon-generator-views');
+
+        // Must happen during register(), not boot(): an app's own service provider may call
+        // LaravelFaviconGenerator::resolveUsing() (the facade) from its own boot() — if this
+        // singleton isn't bound yet at that point, the facade auto-resolves and caches a
+        // throwaway instance instead, and app(LaravelFaviconGenerator::class) elsewhere (the
+        // Blade component) gets a *different* instance that never had resolveUsing() called on
+        // it. register() is guaranteed to run, for every provider, before any provider's boot().
+        $this->app->singleton(LaravelFaviconGenerator::class, function () {
+            return new LaravelFaviconGenerator;
+        });
     }
 }

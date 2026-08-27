@@ -16,6 +16,8 @@ class LaravelFaviconGenerator
 
     protected array $generatedFiles = [];
 
+    protected ?\Closure $resolver = null;
+
     public function __construct()
     {
         // Use Imagick driver if available, otherwise fall back to GD
@@ -28,6 +30,50 @@ class LaravelFaviconGenerator
         // Create image manager with configured driver
         $this->imageManager = new ImageManager($driver);
         $this->outputPath = config('favicon-generator.output_path', 'favicon');
+    }
+
+    /**
+     * Registers how to find "the current favicon target" — an app with more than one brand
+     * (multi-tenant, multi-site, whatever its own domain calls it) registers this once (e.g. in
+     * a service provider's boot()), and <x-favicon-meta /> takes care of the rest: resolving it
+     * on every request and regenerating on demand when stale. Nothing about that orchestration
+     * needs reimplementing per app — only what "the current one" means there does.
+     *
+     * @param  \Closure(): (array{source: string, output_path: ?string, manifest?: array}|null)  $resolver
+     */
+    public function resolveUsing(\Closure $resolver): void
+    {
+        $this->resolver = $resolver;
+    }
+
+    /**
+     * @return array{source: string, output_path: ?string, manifest?: array}|null
+     */
+    public function resolve(): ?array
+    {
+        return $this->resolver ? ($this->resolver)() : null;
+    }
+
+    /**
+     * Regenerates only when there's nothing there yet, or the source has changed since the last
+     * generation — cheap to call on every request (a couple of filesystem stats) once warm. This
+     * is what makes the favicon a genuinely dynamic asset: nothing needs to remember to trigger
+     * generation after an upload, a settings save, or a deploy — the next request just finds it
+     * stale and rebuilds it.
+     *
+     * @param  array  $manifestOptions  Optional manifest options (name, short_name, theme_color, background_color)
+     * @return array List of generated files, empty if the existing set was already current
+     */
+    public function generateIfNeeded(string $sourceImagePath, ?string $outputPath = null, array $manifestOptions = []): array
+    {
+        $resolvedOutputPath = $outputPath ?? config('favicon-generator.output_path', 'favicon');
+        $marker = public_path("{$resolvedOutputPath}/favicon.ico");
+
+        if (File::exists($marker) && File::exists($sourceImagePath) && filemtime($marker) >= filemtime($sourceImagePath)) {
+            return [];
+        }
+
+        return $this->generate($sourceImagePath, $manifestOptions, $outputPath);
     }
 
     /**
@@ -71,18 +117,30 @@ class LaravelFaviconGenerator
      *
      * @param  string  $sourceImagePath  Path to the source image
      * @param  array  $manifestOptions  Optional manifest options (name, short_name, theme_color, background_color)
+     * @param  string|null  $outputPath  Path relative to public/, overriding config('favicon-generator.output_path')
+     *                                   for this call only — lets a single process generate multiple favicon sets
+     *                                   (e.g. one per tenant) without mutating global config between calls.
      * @return array List of generated files
      */
-    public function generate(string $sourceImagePath, array $manifestOptions = []): array
+    public function generate(string $sourceImagePath, array $manifestOptions = [], ?string $outputPath = null): array
     {
         if (! File::exists($sourceImagePath)) {
             throw new \InvalidArgumentException("Source image not found: {$sourceImagePath}");
         }
 
+        $this->outputPath = $outputPath ?? config('favicon-generator.output_path', 'favicon');
         $this->generatedFiles = [];
         $this->ensureOutputDirectoryExists();
 
-        $sourceImage = $this->decodeImage($sourceImagePath);
+        // An SVG has no intrinsic pixel size — decoding it directly (Intervention's read()/
+        // decodePath()) rasterizes at whatever low default resolution the driver falls back to
+        // (Imagick: ~72dpi), producing a tiny raster that every size below is then upscaled
+        // from, however large the target — blocky regardless of source quality. Rasterizing it
+        // ourselves first, at a resolution set BEFORE Imagick reads the file (has to be — it
+        // can't be fixed after read, the pixels already exist by then), gives every other step
+        // a properly high-resolution starting point.
+        $rasterizedSvgPath = $this->isSvg($sourceImagePath) ? $this->rasterizeSvg($sourceImagePath) : null;
+        $sourceImage = $this->decodeImage($rasterizedSvgPath ?? $sourceImagePath);
 
         // Generate each favicon type
         $this->generateIcoFavicon($sourceImage);
@@ -92,7 +150,45 @@ class LaravelFaviconGenerator
         $this->generateWebAppManifestIcons($sourceImage);
         $this->generateWebManifest($manifestOptions);
 
+        if ($rasterizedSvgPath && file_exists($rasterizedSvgPath)) {
+            unlink($rasterizedSvgPath);
+        }
+
         return $this->generatedFiles;
+    }
+
+    protected function isSvg(string $path): bool
+    {
+        return strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'svg';
+    }
+
+    /**
+     * Rasterizes an SVG at high resolution, before Imagick reads it — setResolution() only
+     * affects a read that hasn't happened yet, it can't re-rasterize pixels that already exist.
+     * Returns null (falling back to the original, low-quality decode) rather than throwing: a
+     * malformed or unsupported SVG shouldn't abort generation entirely over one input format.
+     */
+    protected function rasterizeSvg(string $svgPath): ?string
+    {
+        if (! extension_loaded('imagick')) {
+            return null;
+        }
+
+        try {
+            $imagick = new \Imagick;
+            $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
+            $imagick->setResolution(300, 300);
+            $imagick->readImage($svgPath);
+            $imagick->setImageFormat('png');
+
+            $tempPath = sys_get_temp_dir().'/favicon_svg_source_'.uniqid().'.png';
+            $imagick->writeImage($tempPath);
+            $imagick->clear();
+
+            return $tempPath;
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     /**
@@ -294,16 +390,19 @@ SVG;
             $content['background_color'] = $options['background_color'];
         }
 
-        // Add icons to manifest
+        // Add icons to manifest — cache-busted the same way favicon-meta.blade.php busts its own
+        // links: these src values are only ever read from a freshly (re)written manifest, so
+        // "now" is a valid version stamp for whatever generate() just wrote to disk.
         $manifestIcons = [];
         $iconConfig = config('favicon-generator.favicon_types.web_app_manifest_icons');
         $sizes = $iconConfig['sizes'] ?? [192, 512];
         $filenamePattern = $iconConfig['filename_pattern'] ?? 'web-app-manifest-{size}x{size}.png';
+        $version = time();
 
         foreach ($sizes as $size) {
             $iconFilename = str_replace('{size}', $size, $filenamePattern);
             $manifestIcons[] = [
-                'src' => "/{$this->outputPath}/{$iconFilename}",
+                'src' => "/{$this->outputPath}/{$iconFilename}?v={$version}",
                 'sizes' => "{$size}x{$size}",
                 'type' => 'image/png',
             ];

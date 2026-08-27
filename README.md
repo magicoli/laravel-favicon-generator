@@ -96,6 +96,78 @@ $generator = new LaravelFaviconGenerator();
 $generatedFiles = $generator->generate('path/to/your/source/image.png');
 ```
 
+`generate()` also accepts an explicit output path as its third argument, overriding
+`config('favicon-generator.output_path')` for that one call — useful for generating more than
+one favicon set from a single process without mutating global config in between:
+
+```php
+$generator->generate($sourcePath, $manifestOptions, 'favicons/some-other-set');
+```
+
+### Multiple Favicon Sets (Multi-Tenant, Multi-Brand, ...)
+
+An app with more than one brand — multi-tenant, multi-site, whatever its own domain calls it —
+registers a resolver closure once, typically in a service provider's `boot()`:
+
+```php
+use Blockpoint\LaravelFaviconGenerator\Facades\LaravelFaviconGenerator;
+
+LaravelFaviconGenerator::resolveUsing(function (): ?array {
+    $tenant = /* however your app resolves the current one */;
+
+    return $tenant ? [
+        'source' => $tenant->iconPath(),           // an absolute filesystem path
+        'output_path' => "favicons/{$tenant->slug}", // relative to public/, or null for the default
+        'manifest' => ['name' => $tenant->name],    // optional: name, short_name, theme_color, background_color
+    ] : null; // null falls back to config('favicon-generator.output_path')
+});
+```
+
+`<x-favicon-meta />` then needs nothing else — it resolves the closure and regenerates on demand
+on every request (see "Automatic Regeneration" below), so the app never has to remember to
+trigger generation itself after an upload, a settings change, or a deploy.
+
+> Calling the Facade from your own service provider's `boot()` (as above) is safe regardless of
+> provider order: this package binds its singleton during `register()`, and Laravel guarantees
+> every provider's `register()` completes before any provider's `boot()` runs — so the binding
+> always exists by the time any `boot()`-time Facade call resolves it.
+
+### Automatic Regeneration
+
+Favicons don't need a manual regeneration step (a console command, an observer). Every time
+`<x-favicon-meta />` renders, it calls `generateIfNeeded()`, which regenerates only when the
+existing output is missing or older than the source image — a couple of cheap filesystem stats
+once warm, a real regeneration only when something actually changed:
+
+```php
+$generator->generateIfNeeded($sourcePath, $outputPath, $manifestOptions);
+```
+
+Browsers cache favicon-type assets unusually aggressively, often ignoring normal `Cache-Control`
+headers — regenerating the files at the same URL isn't enough on its own to make a viewer see
+the update. `<x-favicon-meta />` appends a `?v=` query string derived from the generated
+`favicon.ico`'s own mtime to every link it renders (and a matching one to the icons referenced
+from inside `site.webmanifest`), so the URL itself changes whenever the file does, forcing a
+refetch — no dependency on how long a browser happens to cache things for.
+
+### A Note on SVG Sources With Embedded Web Fonts
+
+If your source SVG renders text via an embedded font (a `@font-face` with a base64 `woff2`
+`src`, the common export format from design tools) rather than converting the text to outline
+paths, be aware: ImageMagick's SVG rasterizer (used for every raster output — the `.ico`, the
+PNGs, the manifest icons) does **not** reliably read that embedded font. It typically falls back
+to a generic system font instead, silently — no error, no warning, just the wrong typeface in
+the generated raster files. The vector `favicon.svg` output itself is unaffected (browsers
+render that directly, with full font support) — this only affects the rasterized outputs.
+
+This package rasterizes SVG sources at a fixed high resolution before decoding them (so results
+are crisp rather than blurry), but it cannot currently substitute the correct font into that
+rasterization. If your source SVG depends on an embedded font for its text, and the generated
+`.ico`/PNG outputs render in the wrong typeface, provide an already-rasterized PNG/JPG as the
+source instead (exported with the real font, e.g. from the same design tool that produced the
+SVG) — the package always uses whatever source it's given as-is, it will not substitute a
+different file on your behalf.
+
 ## Testing
 
 ```bash

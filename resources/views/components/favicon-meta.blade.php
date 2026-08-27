@@ -1,12 +1,22 @@
-{{-- Favicon Meta Tags Component --}}
+{{--
+    Favicon Meta Tags Component — $faviconPath is resolved and kept current by the component
+    class. Browsers cache favicon-type assets unusually aggressively, often ignoring normal
+    Cache-Control — regenerating the files at the same URL isn't enough on its own, a viewer can
+    keep seeing the old bytes for a long time. A ?v= query string tied to the file's own mtime
+    forces a fetch whenever the file actually changes, while leaving the URL (and browser cache)
+    alone the rest of the time.
+--}}
 @php
-    $faviconPath = config('favicon-generator.output_path', 'favicon');
+    $version = file_exists(public_path("{$faviconPath}/favicon.ico"))
+        ? filemtime(public_path("{$faviconPath}/favicon.ico"))
+        : null;
+    $versioned = fn (string $path): string => asset($path).($version ? "?v={$version}" : '');
 @endphp
-<link rel="icon" type="image/png" href="{{ asset("{$faviconPath}/favicon-96x96.png") }}" sizes="96x96" />
-<link rel="icon" type="image/svg+xml" href="{{ asset("{$faviconPath}/favicon.svg") }}" />
-<link rel="shortcut icon" href="{{ asset("{$faviconPath}/favicon.ico") }}" />
-<link rel="apple-touch-icon" sizes="180x180" href="{{ asset("{$faviconPath}/apple-touch-icon.png") }}" />
-<link rel="manifest" href="{{ asset("{$faviconPath}/site.webmanifest") }}" />
+<link rel="icon" type="image/png" href="{{ $versioned("{$faviconPath}/favicon-96x96.png") }}" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="{{ $versioned("{$faviconPath}/favicon.svg") }}" />
+<link rel="shortcut icon" href="{{ $versioned("{$faviconPath}/favicon.ico") }}" />
+<link rel="apple-touch-icon" sizes="180x180" href="{{ $versioned("{$faviconPath}/apple-touch-icon.png") }}" />
+<link rel="manifest" href="{{ $versioned("{$faviconPath}/site.webmanifest") }}" />
 
 {{-- Web App Title Meta Tags --}}
 @php
