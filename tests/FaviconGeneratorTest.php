@@ -190,3 +190,26 @@ it('renders a version query string tied to favicon.ico\'s own mtime, so browsers
     File::deleteDirectory(public_path('favicon-version'));
     File::delete($testImagePath);
 });
+
+it('never lets a resolver/generation failure crash the page — the component always renders', function () {
+    app(LaravelFaviconGenerator::class)->resolveUsing(fn () => [
+        'source' => '/nonexistent/path/does-not-exist.svg',
+        'output_path' => 'favicon-broken',
+    ]);
+
+    $html = Blade::render('<x-favicon-meta />');
+
+    expect($html)->toBeString()->not->toBe('');
+
+    File::deleteDirectory(public_path('favicon-broken'));
+});
+
+it('never lets the resolver closure itself throwing crash the page', function () {
+    app(LaravelFaviconGenerator::class)->resolveUsing(function () {
+        throw new \RuntimeException('resolver blew up');
+    });
+
+    $html = Blade::render('<x-favicon-meta />');
+
+    expect($html)->toBeString()->not->toBe('');
+});
