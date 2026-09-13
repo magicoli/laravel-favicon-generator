@@ -1,18 +1,22 @@
 {
-    "name": "blockpoint/laravel-favicon-generator",
-    "description": "Package to generate favicons within your Laravel application.",
+    "name": "magicoli/laravel-favicon-generator",
+    "description": "Package to generate favicons within your Laravel application. (Oli's fork)",
     "keywords": [
         "Blockpoint",
         "laravel",
         "laravel-favicon-generator"
     ],
-    "homepage": "https://github.com/blockpoint/laravel-favicon-generator",
+    "homepage": "https://github.com/magicoli/laravel-favicon-generator",
     "license": "MIT",
     "authors": [
         {
             "name": "Blockpoint",
             "email": "info@blockpoint.nl",
             "role": "Developer"
+        },
+        {
+            "name": "Olivier van Helden",
+            "homepage": "https://magiiic.com"
         }
     ],
     "require": {
