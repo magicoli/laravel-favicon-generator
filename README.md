@@ -1,5 +1,7 @@
 # Laravel Favicon Generator
 
+> This is a fork of [Blockpoint/laravel-favicon-generator](https://github.com/Blockpoint/laravel-favicon-generator.git) providing Larvel 13 compatibility. Hopefully the original author will apply the PR and make this repo obsolete.
+
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/magicoli/laravel-favicon-generator.svg?style=flat-square)](https://packagist.org/packages/magicoli/laravel-favicon-generator)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/magicoli/laravel-favicon-generator/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/magicoli/laravel-favicon-generator/actions?query=workflow%3Arun-tests+branch%3Amain)
 [![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/magicoli/laravel-favicon-generator/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/magicoli/laravel-favicon-generator/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
