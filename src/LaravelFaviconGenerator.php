@@ -10,7 +10,7 @@ use Intervention\Image\Interfaces\ImageInterface;
 
 class LaravelFaviconGenerator
 {
-    protected ImageManager $imageManager;
+    protected ?ImageManager $imageManager = null;
 
     protected string $outputPath;
 
@@ -20,16 +20,19 @@ class LaravelFaviconGenerator
 
     public function __construct()
     {
-        // Use Imagick driver if available, otherwise fall back to GD
-        if (extension_loaded('imagick')) {
-            $driver = new ImagickDriver;
-        } else {
-            $driver = new Driver;
-        }
-
-        // Create image manager with configured driver
-        $this->imageManager = new ImageManager($driver);
         $this->outputPath = config('favicon-generator.output_path', 'favicon');
+    }
+
+    /**
+     * The image manager, built on first use: rendering the meta tags resolves this class on
+     * every page, and a server without GD or Imagick must still serve favicons generated
+     * elsewhere. Imagick when available, GD otherwise.
+     */
+    protected function imageManager(): ImageManager
+    {
+        return $this->imageManager ??= new ImageManager(
+            extension_loaded('imagick') ? new ImagickDriver : new Driver,
+        );
     }
 
     /**
@@ -84,9 +87,9 @@ class LaravelFaviconGenerator
      */
     protected function decodeImage(string $path): ImageInterface
     {
-        return method_exists($this->imageManager, 'decodePath')
-            ? $this->imageManager->decodePath($path)
-            : $this->imageManager->read($path);
+        return method_exists($this->imageManager(), 'decodePath')
+            ? $this->imageManager()->decodePath($path)
+            : $this->imageManager()->read($path);
     }
 
     /**
@@ -95,9 +98,9 @@ class LaravelFaviconGenerator
      */
     protected function createCanvas(int $width, int $height): ImageInterface
     {
-        return method_exists($this->imageManager, 'createImage')
-            ? $this->imageManager->createImage($width, $height)
-            : $this->imageManager->create($width, $height);
+        return method_exists($this->imageManager(), 'createImage')
+            ? $this->imageManager()->createImage($width, $height)
+            : $this->imageManager()->create($width, $height);
     }
 
     /**

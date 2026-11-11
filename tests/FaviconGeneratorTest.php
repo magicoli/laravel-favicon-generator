@@ -213,3 +213,13 @@ it('never lets the resolver closure itself throwing crash the page', function ()
 
     expect($html)->toBeString()->not->toBe('');
 });
+
+it('needs no image driver until it actually generates', function () {
+    // Rendering <x-favicon-meta /> resolves the generator on every page: a server without GD or
+    // Imagick must still serve pages whose favicons were generated elsewhere.
+    $generator = new LaravelFaviconGenerator;
+
+    $property = new ReflectionProperty($generator, 'imageManager');
+
+    expect($property->getValue($generator))->toBeNull();
+});
